@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { resetUserBalance } from '../services/api';
+import { resetUserBalance, updateInvestments } from '../services/api';
 
 const Navbar = ({ balance, onBalanceUpdate }) => {
   const location = useLocation();
   const [isResetting, setIsResetting] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   const isActive = (path) => {
     return location.pathname === path;
@@ -18,21 +19,44 @@ const Navbar = ({ balance, onBalanceUpdate }) => {
   };
 
   const handleResetBalance = async () => {
-    if (window.confirm('Are you sure you want to reset your balance to $10,000? This will clear all your current progress.')) {
+    if (window.confirm('Are you sure you want to reset your account? This will:\n• Reset your balance to $10,000\n• Clear ALL your investments\n• Reset project funding\n\nThis action cannot be undone!')) {
       setIsResetting(true);
       try {
         const response = await resetUserBalance();
         if (response.success) {
           onBalanceUpdate(response.balance);
-          alert('Balance successfully reset to $10,000!');
+          const message = response.investments_cleared > 0 
+            ? `Account reset complete!\n• Balance: $10,000\n• ${response.investments_cleared} investments cleared\n• ${response.projects_reset} projects updated`
+            : 'Balance successfully reset to $10,000!';
+          alert(message);
         } else {
-          alert('Error resetting balance: ' + response.message);
+          alert('Error resetting account: ' + response.message);
         }
       } catch (error) {
-        alert('Error resetting balance. Please try again.');
+        alert('Error resetting account. Please try again.');
       } finally {
         setIsResetting(false);
       }
+    }
+  };
+
+  const handleUpdateInvestments = async () => {
+    setIsUpdating(true);
+    try {
+      const response = await updateInvestments();
+      if (response.success) {
+        onBalanceUpdate(response.new_balance);
+        const changeText = response.balance_change >= 0 
+          ? `+$${response.balance_change.toFixed(2)}` 
+          : `-$${Math.abs(response.balance_change).toFixed(2)}`;
+        alert(`Investments updated!\n• ${response.investments_updated} investments processed\n• Balance change: ${changeText}\n• New balance: $${response.new_balance.toFixed(2)}`);
+      } else {
+        alert('Error updating investments: ' + response.message);
+      }
+    } catch (error) {
+      alert('Error updating investments. Please try again.');
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -113,6 +137,16 @@ const Navbar = ({ balance, onBalanceUpdate }) => {
             <div className="bg-success-100 text-success-800 px-3 py-1 rounded-full text-sm font-medium">
               Balance: {formatCurrency(balance)}
             </div>
+            
+            {/* Update Investments Button */}
+            <button
+              onClick={handleUpdateInvestments}
+              disabled={isUpdating}
+              className="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1 rounded-full text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Update investment values and sync with balance"
+            >
+              {isUpdating ? '⏳' : '📈'}
+            </button>
             
             {/* Reset Balance Button */}
             <button

@@ -324,3 +324,200 @@ class Database:
             return True
         except Exception as e:
             return False
+    
+    def reset_user_completely(self, user_id, default_balance):
+        """Reset user balance and clear all investments, also reset project funding"""
+        try:
+            conn = self.get_connection()
+            
+            # Get user's current investments to calculate funding to subtract from projects
+            user_investments = conn.execute('''
+                SELECT project_id, SUM(amount) as total_investment
+                FROM investments 
+                WHERE user_id = ?
+                GROUP BY project_id
+            ''', (user_id,)).fetchall()
+            
+            # Count investments being cleared
+            investment_count = conn.execute('''
+                SELECT COUNT(*) FROM investments WHERE user_id = ?
+            ''', (user_id,)).fetchone()[0]
+            
+            # Reset project funding by subtracting user's investments
+            projects_reset = 0
+            for investment in user_investments:
+                project_id = investment['project_id']
+                amount_to_subtract = investment['total_investment']
+                
+                # Get current project funding
+                current_funding = conn.execute('''
+                    SELECT current_funding FROM projects WHERE id = ?
+                ''', (project_id,)).fetchone()
+                
+                if current_funding:
+                    new_funding = max(0, current_funding['current_funding'] - amount_to_subtract)
+                    conn.execute('''
+                        UPDATE projects SET current_funding = ? WHERE id = ?
+                    ''', (new_funding, project_id))
+                    projects_reset += 1
+            
+            # Clear all user investments
+            conn.execute('''
+                DELETE FROM investments WHERE user_id = ?
+            ''', (user_id,))
+            
+            # Reset user balance
+            conn.execute('''
+                UPDATE users SET balance = ? WHERE id = ?
+            ''', (default_balance, user_id))
+            
+            conn.commit()
+            conn.close()
+            
+            return {
+                'success': True,
+                'investments_cleared': investment_count,
+                'projects_reset': projects_reset,
+                'message': f'Reset complete: {investment_count} investments cleared, {projects_reset} projects updated'
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'Error during complete reset: {str(e)}'
+            }
+    
+    def update_investment_values(self, user_id=1):
+        """Update investment values based on project performance and sync with user balance"""
+        import random
+        import math
+        from datetime import datetime, timedelta
+        
+        try:
+            conn = self.get_connection()
+            
+            # Get all user investments with project details
+            investments = conn.execute('''
+                SELECT i.id, i.user_id, i.project_id, i.amount, i.current_value, 
+                       i.investment_date, p.expected_roi, p.risk_level, p.name
+                FROM investments i
+                JOIN projects p ON i.project_id = p.id
+                WHERE i.user_id = ?
+            ''', (user_id,)).fetchall()
+            
+            if not investments:
+                return {'success': True, 'message': 'No investments to update', 'total_change': 0}
+            
+            total_balance_change = 0
+            updated_investments = 0
+            
+            for investment in investments:
+                # Calculate time since investment (simulate market performance over time)
+                investment_date = datetime.fromisoformat(investment['investment_date'])
+                days_invested = (datetime.now() - investment_date).days
+                
+                if days_invested < 1:
+                    continue  # Don't update same-day investments
+                
+                # Calculate performance based on expected ROI and risk level
+                expected_roi = investment['expected_roi'] / 100  # Convert percentage to decimal
+                risk_multiplier = self._get_risk_multiplier(investment['risk_level'])
+                
+                # Add some randomness based on risk level
+                random_factor = random.uniform(-risk_multiplier, risk_multiplier)
+                daily_performance = (expected_roi / 365) + (random_factor / 365)
+                
+                # Calculate new value with compound growth
+                original_amount = investment['amount']
+                new_value = original_amount * (1 + daily_performance) ** days_invested
+                
+                # Ensure minimum value (can't lose more than 90% for safety)
+                new_value = max(new_value, original_amount * 0.1)
+                
+                # Calculate the change in value
+                old_value = investment['current_value']
+                value_change = new_value - old_value
+                
+                # Update investment value
+                conn.execute('''
+                    UPDATE investments SET current_value = ? WHERE id = ?
+                ''', (new_value, investment['id']))
+                
+                total_balance_change += value_change
+                updated_investments += 1
+            
+            # Update user balance with the total change
+            if total_balance_change != 0:
+                current_balance = conn.execute('''
+                    SELECT balance FROM users WHERE id = ?
+                ''', (user_id,)).fetchone()['balance']
+                
+                new_balance = current_balance + total_balance_change
+                conn.execute('''
+                    UPDATE users SET balance = ? WHERE id = ?
+                ''', (new_balance, user_id))
+            
+            conn.commit()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': f'Updated {updated_investments} investments',
+                'total_change': total_balance_change,
+                'investments_updated': updated_investments
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'Error updating investments: {str(e)}'
+            }
+    
+    def _get_risk_multiplier(self, risk_level):
+        """Get risk multiplier based on risk level"""
+        risk_multipliers = {
+            'Low': 0.02,      # 2% volatility
+            'Medium': 0.05,   # 5% volatility  
+            'High': 0.10      # 10% volatility
+        }
+        return risk_multipliers.get(risk_level, 0.05)
+    
+    def get_investment_performance_summary(self, user_id=1):
+        """Get summary of investment performance"""
+        try:
+            conn = self.get_connection()
+            
+            investments = conn.execute('''
+                SELECT SUM(amount) as total_invested, SUM(current_value) as total_value
+                FROM investments WHERE user_id = ?
+            ''', (user_id,)).fetchone()
+            
+            conn.close()
+            
+            if not investments or not investments['total_invested']:
+                return {
+                    'total_invested': 0,
+                    'total_value': 0,
+                    'total_gain_loss': 0,
+                    'performance_percentage': 0
+                }
+            
+            total_invested = investments['total_invested']
+            total_value = investments['total_value']
+            total_gain_loss = total_value - total_invested
+            performance_percentage = (total_gain_loss / total_invested) * 100 if total_invested > 0 else 0
+            
+            return {
+                'total_invested': total_invested,
+                'total_value': total_value,
+                'total_gain_loss': total_gain_loss,
+                'performance_percentage': performance_percentage
+            }
+            
+        except Exception as e:
+            return {
+                'total_invested': 0,
+                'total_value': 0,
+                'total_gain_loss': 0,
+                'performance_percentage': 0
+            }

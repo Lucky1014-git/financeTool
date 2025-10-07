@@ -1,16 +1,22 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import random
 import time
 from models import Database
 
-app = Flask(__name__)
+#app = Flask(__name__)
+app = Flask(__name__, static_folder="../frontend/build", static_url_path="/")
+
 CORS(app)  # Enable CORS for all routes
 
 # Initialize database
 db = Database()
 
-@app.route('/')
+@app.route("/")
+def serve_index():
+    return send_from_directory(app.static_folder, "index.html")
+
+@app.route('/health', methods=['GET'])
 def index():
     """Health check endpoint"""
     return jsonify({
@@ -253,30 +259,83 @@ def get_user_balance():
 
 @app.route('/user/reset-balance', methods=['POST'])
 def reset_user_balance():
-    """Reset user balance to default amount"""
+    """Reset user balance to default amount and clear all investments"""
     try:
         user_id = request.json.get('user_id', 1) if request.json else 1
         default_balance = 10000.0
         
-        # Update user balance in database
-        updated = db.update_user_balance(user_id, default_balance)
+        # Reset user balance and clear all investments
+        reset_result = db.reset_user_completely(user_id, default_balance)
         
-        if not updated:
+        if not reset_result['success']:
             return jsonify({
                 'success': False,
-                'message': 'Failed to reset balance'
+                'message': reset_result['message']
             }), 400
         
         return jsonify({
             'success': True,
             'balance': default_balance,
-            'message': 'Balance successfully reset to $10,000'
+            'message': 'Balance and investments successfully reset! Starting fresh with $10,000.',
+            'investments_cleared': reset_result['investments_cleared'],
+            'projects_reset': reset_result['projects_reset']
         })
     
     except Exception as e:
         return jsonify({
             'success': False,
             'message': f'Error resetting balance: {str(e)}'
+        }), 500
+
+@app.route('/user/update-investments', methods=['POST'])
+def update_user_investments():
+    """Update investment values and sync with user balance"""
+    try:
+        user_id = request.json.get('user_id', 1) if request.json else 1
+        
+        result = db.update_investment_values(user_id)
+        
+        if result['success']:
+            # Get updated user balance
+            user = db.get_user(user_id)
+            balance = user['balance'] if user else 0
+            
+            return jsonify({
+                'success': True,
+                'message': result['message'],
+                'balance_change': result['total_change'],
+                'new_balance': balance,
+                'investments_updated': result.get('investments_updated', 0)
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': result['message']
+            }), 400
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error updating investments: {str(e)}'
+        }), 500
+
+@app.route('/user/investment-performance', methods=['GET'])
+def get_investment_performance():
+    """Get investment performance summary"""
+    try:
+        user_id = request.args.get('user_id', 1, type=int)
+        
+        performance = db.get_investment_performance_summary(user_id)
+        
+        return jsonify({
+            'success': True,
+            'performance': performance
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error getting performance: {str(e)}'
         }), 500
 
 if __name__ == '__main__':

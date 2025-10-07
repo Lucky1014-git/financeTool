@@ -80,6 +80,28 @@ export const resetUserBalance = async () => {
   }
 };
 
+export const updateInvestments = async () => {
+  try {
+    const response = await api.post('/user/update-investments', {
+      user_id: 1 // Default user for demo
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error updating investments:', error);
+    throw error;
+  }
+};
+
+export const getInvestmentPerformance = async () => {
+  try {
+    const response = await api.get('/user/investment-performance');
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching investment performance:', error);
+    throw error;
+  }
+};
+
 // Local Storage helpers
 export const saveToLocalStorage = (key, data) => {
   try {
