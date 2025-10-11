@@ -521,3 +521,4 @@ class Database:
                 'total_gain_loss': 0,
                 'performance_percentage': 0
             }
+        
