@@ -57,6 +57,8 @@ npm start
 
 ## Development
 
+[![Athena Award Badge](https://img.shields.io/endpoint?url=https%3A%2F%2Faward.athena.hackclub.com%2Fapi%2Fbadge)](https://award.athena.hackclub.com?utm_source=readme)
+
 - Backend runs on `http://localhost:5000`
 - Frontend runs on `http://localhost:3000`
 - CORS enabled for local development
